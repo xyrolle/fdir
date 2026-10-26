@@ -45,6 +45,7 @@ for (const type of apiTypes) {
       includeBasePath: true,
       suppressErrors: false,
     }).crawl("__tests__");
+    const files = await api[type]();
     t.expect(files.every((file) => file.startsWith("__tests__"))).toBeTruthy();
   });
 
