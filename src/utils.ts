@@ -17,6 +17,11 @@ export function convertSlashes(path: string, separator: PathSeparator) {
   return path.replace(SLASHES_REGEX, separator);
 }
 
+// A native path in the output's separator, which leaves it as is when native
+export function toOutputPath(path: string, separator: PathSeparator) {
+  return separator === sep ? path : convertSlashes(path, separator);
+}
+
 const WINDOWS_ROOT_DIR_REGEX = /^[a-z]:[\\/]$/i;
 export function isRootDirectory(path: string) {
   return path === "/" || WINDOWS_ROOT_DIR_REGEX.test(path);

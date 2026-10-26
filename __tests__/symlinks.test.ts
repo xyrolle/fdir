@@ -570,6 +570,19 @@ for (const type of apiTypes) {
             ])
           );
         });
+
+        test(`resolve them (relative paths: true) with the "${separator}" separator`, async (t) => {
+          const api = new fdir()
+            .withErrors()
+            .withPathSeparator(separator)
+            .withSymlinks()
+            .withRelativePaths()
+            .crawl("/backslash/root");
+          const files = await api[type]();
+          t.expect(files.sort()).toStrictEqual(
+            inSeparator(["../dir\\name/wanted", "../dir\\name/wanted"])
+          );
+        });
       }
     }
   );

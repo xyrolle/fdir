@@ -1,5 +1,5 @@
 import { basename, dirname, sep } from "path";
-import { convertSlashes, isRootDirectory, normalizePath } from "../utils";
+import { isRootDirectory, normalizePath, toOutputPath } from "../utils";
 import { ResultCallback, WalkerState, Options } from "../types";
 import * as joinPath from "./functions/join-path";
 import * as pushDirectory from "./functions/push-directory";
@@ -25,7 +25,6 @@ import { Aborter } from "./aborter";
 export class Walker<TOutput extends Output> {
   private readonly root: string;
   private readonly outputRoot: string;
-  private readonly outputsNativePaths: boolean;
   private readonly isSynchronous: boolean;
   private readonly state: WalkerState;
   private readonly joinPath: joinPath.JoinPathFunction;
@@ -45,8 +44,8 @@ export class Walker<TOutput extends Output> {
     this.isSynchronous = !callback;
     this.callbackInvoker = invokeCallback.build(options, this.isSynchronous);
 
-    this.outputsNativePaths = options.pathSeparator === sep;
     this.root = normalizePath(root, options);
+    this.outputRoot = toOutputPath(this.root, options.pathSeparator);
     this.state = {
       root: isRootDirectory(this.root) ? this.root : this.root.slice(0, -1),
       // Perf: we explicitly tell the compiler to optimize for String arrays
@@ -62,7 +61,6 @@ export class Walker<TOutput extends Output> {
       controller: new Aborter(),
       fs: options.fs || nativeFs,
     };
-    this.outputRoot = this.toOutputPath(this.root);
 
     /*
      * Perf: We conditionally change functions according to options. This gives a slight
@@ -93,12 +91,6 @@ export class Walker<TOutput extends Output> {
       this.walk
     );
     return this.isSynchronous ? this.callbackInvoker(this.state, null) : null;
-  }
-
-  private toOutputPath(path: string) {
-    return this.outputsNativePaths
-      ? path
-      : convertSlashes(path, this.state.options.pathSeparator);
   }
 
   private walk = (
@@ -141,9 +133,10 @@ export class Walker<TOutput extends Output> {
         this.pushFile(filename, files, this.state.counts, filters);
       } else if (entry.isDirectory()) {
         let path = joinPath.joinDirectoryPath(entry.name, directoryPath, sep);
-        const output = this.outputsNativePaths
-          ? path
-          : joinPath.joinDirectoryPath(entry.name, outputPath, pathSeparator);
+        const output =
+          pathSeparator === sep
+            ? path
+            : joinPath.joinDirectoryPath(entry.name, outputPath, pathSeparator);
         if (exclude && exclude(entry.name, output)) continue;
         this.pushDirectory(output, paths, filters);
         this.walkDirectory(
@@ -160,7 +153,7 @@ export class Walker<TOutput extends Output> {
           if (stat.isDirectory()) {
             resolvedPath = normalizePath(resolvedPath, this.state.options);
             const directoryPath = useRealPaths ? resolvedPath : path + sep;
-            const outputPath = this.toOutputPath(directoryPath);
+            const outputPath = toOutputPath(directoryPath, pathSeparator);
             if (exclude && exclude(entry.name, outputPath)) return;
 
             this.walkDirectory(
@@ -180,7 +173,7 @@ export class Walker<TOutput extends Output> {
             );
             resolvedPath = this.joinPath(
               filename,
-              this.toOutputPath(directoryPath),
+              toOutputPath(directoryPath, pathSeparator),
               directoryPath
             );
             this.pushFile(resolvedPath, files, this.state.counts, filters);

@@ -1,6 +1,6 @@
 import { relative } from "path";
 import { Options, PathSeparator } from "../../types";
-import { convertSlashes } from "../../utils";
+import { toOutputPath } from "../../utils";
 
 export function joinPathWithBasePath(filename: string, directoryPath: string) {
   return directoryPath + filename;
@@ -18,7 +18,7 @@ function joinPathWithRelativePath(root: string, options: Options) {
     if (sameRoot) return outputPath.slice(root.length) + filename;
     else
       return (
-        convertSlashes(relative(root, directoryPath), options.pathSeparator) +
+        toOutputPath(relative(root, directoryPath), options.pathSeparator) +
         options.pathSeparator +
         filename
       );
