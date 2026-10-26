@@ -1,5 +1,5 @@
-import { basename, dirname } from "path";
-import { isRootDirectory, normalizePath } from "../utils";
+import { basename, dirname, sep } from "path";
+import { convertSlashes, isRootDirectory, normalizePath } from "../utils";
 import { ResultCallback, WalkerState, Options } from "../types";
 import * as joinPath from "./functions/join-path";
 import * as pushDirectory from "./functions/push-directory";
@@ -16,8 +16,17 @@ import { Output } from "../types";
 import { Counter } from "./counter";
 import { Aborter } from "./aborter";
 
+/*
+ * The walker hands the file system native paths and gives the custom separator
+ * only to what it outputs: converting an output path back would read a name
+ * that contains the other separator as two names. Each directory carries both
+ * forms, which are the same string when the separators match.
+ */
 export class Walker<TOutput extends Output> {
   private readonly root: string;
+  private readonly outputRoot: string;
+  private readonly outputsNativePaths: boolean;
+  private readonly nativeOptions: Options;
   private readonly isSynchronous: boolean;
   private readonly state: WalkerState;
   private readonly joinPath: joinPath.JoinPathFunction;
@@ -37,7 +46,9 @@ export class Walker<TOutput extends Output> {
     this.isSynchronous = !callback;
     this.callbackInvoker = invokeCallback.build(options, this.isSynchronous);
 
-    this.root = normalizePath(root, options);
+    this.outputsNativePaths = options.pathSeparator === sep;
+    this.nativeOptions = { ...options, pathSeparator: sep };
+    this.root = normalizePath(root, this.nativeOptions);
     this.state = {
       root: isRootDirectory(this.root) ? this.root : this.root.slice(0, -1),
       // Perf: we explicitly tell the compiler to optimize for String arrays
@@ -53,6 +64,7 @@ export class Walker<TOutput extends Output> {
       controller: new Aborter(),
       fs: options.fs || nativeFs,
     };
+    this.outputRoot = this.toOutputPath(this.root);
 
     /*
      * Perf: We conditionally change functions according to options. This gives a slight
@@ -60,7 +72,7 @@ export class Walker<TOutput extends Output> {
      * by the javascript engine so there's no function call overhead (in most cases).
      */
     this.joinPath = joinPath.build(this.root, options);
-    this.pushDirectory = pushDirectory.build(this.root, options);
+    this.pushDirectory = pushDirectory.build(this.outputRoot, options);
     this.pushFile = pushFile.build(options);
     this.getArray = getArray.build(options);
     this.groupFiles = groupFiles.build(options);
@@ -69,18 +81,34 @@ export class Walker<TOutput extends Output> {
   }
 
   start(): TOutput | null {
-    this.pushDirectory(this.root, this.state.paths, this.state.options.filters);
+    this.pushDirectory(
+      this.outputRoot,
+      this.state.paths,
+      this.state.options.filters
+    );
     this.walkDirectory(
       this.state,
       this.root,
       this.root,
+      this.outputRoot,
       this.state.options.maxDepth,
       this.walk
     );
     return this.isSynchronous ? this.callbackInvoker(this.state, null) : null;
   }
 
-  private walk = (entries: Dirent[], directoryPath: string, depth: number) => {
+  private toOutputPath(path: string) {
+    return this.outputsNativePaths
+      ? path
+      : convertSlashes(path, this.state.options.pathSeparator);
+  }
+
+  private walk = (
+    entries: Dirent[],
+    directoryPath: string,
+    outputPath: string,
+    depth: number
+  ) => {
     const {
       paths,
       options: {
@@ -111,35 +139,37 @@ export class Walker<TOutput extends Output> {
         entry.isFile() ||
         (entry.isSymbolicLink() && !resolveSymlinks && !excludeSymlinks)
       ) {
-        const filename = this.joinPath(entry.name, directoryPath);
+        const filename = this.joinPath(entry.name, outputPath, directoryPath);
         this.pushFile(filename, files, this.state.counts, filters);
       } else if (entry.isDirectory()) {
-        let path = joinPath.joinDirectoryPath(
-          entry.name,
-          directoryPath,
-          this.state.options.pathSeparator
+        let path = joinPath.joinDirectoryPath(entry.name, directoryPath, sep);
+        const output = this.outputsNativePaths
+          ? path
+          : joinPath.joinDirectoryPath(entry.name, outputPath, pathSeparator);
+        if (exclude && exclude(entry.name, output)) continue;
+        this.pushDirectory(output, paths, filters);
+        this.walkDirectory(
+          this.state,
+          path,
+          path,
+          output,
+          depth - 1,
+          this.walk
         );
-        if (exclude && exclude(entry.name, path)) continue;
-        this.pushDirectory(path, paths, filters);
-        this.walkDirectory(this.state, path, path, depth - 1, this.walk);
       } else if (this.resolveSymlink && entry.isSymbolicLink()) {
         let path = joinPath.joinPathWithBasePath(entry.name, directoryPath);
         this.resolveSymlink(path, this.state, (stat, resolvedPath) => {
           if (stat.isDirectory()) {
-            resolvedPath = normalizePath(resolvedPath, this.state.options);
-            if (
-              exclude &&
-              exclude(
-                entry.name,
-                useRealPaths ? resolvedPath : path + pathSeparator
-              )
-            )
-              return;
+            resolvedPath = normalizePath(resolvedPath, this.nativeOptions);
+            const directoryPath = useRealPaths ? resolvedPath : path + sep;
+            const outputPath = this.toOutputPath(directoryPath);
+            if (exclude && exclude(entry.name, outputPath)) return;
 
             this.walkDirectory(
               this.state,
               resolvedPath,
-              useRealPaths ? resolvedPath : path + pathSeparator,
+              directoryPath,
+              outputPath,
               depth - 1,
               this.walk
             );
@@ -148,15 +178,19 @@ export class Walker<TOutput extends Output> {
             const filename = basename(resolvedPath);
             const directoryPath = normalizePath(
               dirname(resolvedPath),
-              this.state.options
+              this.nativeOptions
             );
-            resolvedPath = this.joinPath(filename, directoryPath);
+            resolvedPath = this.joinPath(
+              filename,
+              this.toOutputPath(directoryPath),
+              directoryPath
+            );
             this.pushFile(resolvedPath, files, this.state.counts, filters);
           }
         });
       }
     }
 
-    this.groupFiles(this.state.groups, directoryPath, files);
+    this.groupFiles(this.state.groups, outputPath, files);
   };
 }
