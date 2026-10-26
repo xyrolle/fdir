@@ -513,6 +513,66 @@ for (const type of apiTypes) {
         .rejects.toThrow(/ENOENT/);
     });
   });
+
+  describe.skipIf(path.sep === "\\")(
+    `${type}: symlinks to a directory whose name contains "\\"`,
+    () => {
+      beforeAll(() => {
+        mock({
+          "/backslash": {
+            "dir\\name": { wanted: "" },
+            dir: { name: { decoy: "" } },
+            root: {
+              link: mock.symlink({ path: "/backslash/dir\\name" }),
+              "file-link": mock.symlink({
+                path: "/backslash/dir\\name/wanted",
+              }),
+            },
+          },
+        });
+      });
+
+      afterAll(() => {
+        mock.restore();
+      });
+
+      for (const separator of ["/", "\\"] as const) {
+        // Only the separators change: the backslash in the name stays
+        const inSeparator = (paths: string[]) =>
+          paths.map((p) => p.split("/").join(separator)).sort();
+
+        test(`resolve them with the "${separator}" separator`, async (t) => {
+          const api = new fdir()
+            .withErrors()
+            .withPathSeparator(separator)
+            .withSymlinks()
+            .crawl("/backslash/root");
+          const files = await api[type]();
+          t.expect(files.sort()).toStrictEqual(
+            inSeparator([
+              "/backslash/dir\\name/wanted",
+              "/backslash/dir\\name/wanted",
+            ])
+          );
+        });
+
+        test(`resolve them (real paths: false) with the "${separator}" separator`, async (t) => {
+          const api = new fdir()
+            .withErrors()
+            .withPathSeparator(separator)
+            .withSymlinks({ resolvePaths: false })
+            .crawl("/backslash/root");
+          const files = await api[type]();
+          t.expect(files.sort()).toStrictEqual(
+            inSeparator([
+              "/backslash/root/file-link",
+              "/backslash/root/link/wanted",
+            ])
+          );
+        });
+      }
+    }
+  );
 }
 
 function resolveSymlinkRoot(p: string) {

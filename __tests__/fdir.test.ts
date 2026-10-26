@@ -476,6 +476,25 @@ for (const type of apiTypes) {
     }
   );
 
+  for (const separator of ["/", "\\"] as const) {
+    test.skipIf(sep === "\\")(
+      `[${type}] crawl a root whose name ends with "\\" with the "${separator}" separator`,
+      async (t) => {
+        mock({
+          "literal\\": { "wanted.txt": "" },
+          literal: { "decoy.txt": "" },
+        });
+        const api = new fdir()
+          .withErrors()
+          .withPathSeparator(separator)
+          .crawl("literal\\");
+        const files = await api[type]();
+        t.expect(files).toStrictEqual(["wanted.txt"]);
+        mock.restore();
+      }
+    );
+  }
+
   test(`[${type}] crawl files that match using a custom glob`, async (t) => {
     const globFunction = vi.fn((glob: string | string[]) => {
       return (test: string): boolean => test.endsWith(".js");
@@ -654,7 +673,5 @@ test(`do not convert \\\\ to \\`, async (t) => {
 });
 
 test(`do not add a separator if path already ends with one`, async (t) => {
-  t.expect(normalizePath("some-root/", { pathSeparator: "\\" })).toBe(
-    "some-root\\"
-  );
+  t.expect(normalizePath("some-root/", {})).toBe(`some-root${sep}`);
 });

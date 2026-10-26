@@ -26,7 +26,6 @@ export class Walker<TOutput extends Output> {
   private readonly root: string;
   private readonly outputRoot: string;
   private readonly outputsNativePaths: boolean;
-  private readonly nativeOptions: Options;
   private readonly isSynchronous: boolean;
   private readonly state: WalkerState;
   private readonly joinPath: joinPath.JoinPathFunction;
@@ -47,8 +46,7 @@ export class Walker<TOutput extends Output> {
     this.callbackInvoker = invokeCallback.build(options, this.isSynchronous);
 
     this.outputsNativePaths = options.pathSeparator === sep;
-    this.nativeOptions = { ...options, pathSeparator: sep };
-    this.root = normalizePath(root, this.nativeOptions);
+    this.root = normalizePath(root, options);
     this.state = {
       root: isRootDirectory(this.root) ? this.root : this.root.slice(0, -1),
       // Perf: we explicitly tell the compiler to optimize for String arrays
@@ -160,7 +158,7 @@ export class Walker<TOutput extends Output> {
         let path = joinPath.joinPathWithBasePath(entry.name, directoryPath);
         this.resolveSymlink(path, this.state, (stat, resolvedPath) => {
           if (stat.isDirectory()) {
-            resolvedPath = normalizePath(resolvedPath, this.nativeOptions);
+            resolvedPath = normalizePath(resolvedPath, this.state.options);
             const directoryPath = useRealPaths ? resolvedPath : path + sep;
             const outputPath = this.toOutputPath(directoryPath);
             if (exclude && exclude(entry.name, outputPath)) return;
@@ -178,7 +176,7 @@ export class Walker<TOutput extends Output> {
             const filename = basename(resolvedPath);
             const directoryPath = normalizePath(
               dirname(resolvedPath),
-              this.nativeOptions
+              this.state.options
             );
             resolvedPath = this.joinPath(
               filename,
