@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, test } from "vitest";
 import { apiTypes, normalize, root } from "./utils";
 import mock from "mock-fs";
-import { fdir, Options } from "../src";
+import { fdir, Options, PathSeparator } from "../src";
+import { convertSlashes } from "../src/utils";
 import path from "path";
 
 const fsWithRelativeSymlinks = {
@@ -398,6 +399,78 @@ for (const type of apiTypes) {
       },
       { timeout: 1000 }
     );
+
+    // Each crawl gives the files of its native-separator crawl, in the other separator
+    const separator = path.sep === "/" ? "\\" : "/";
+    const crawls: Record<
+      string,
+      (api: fdir, separator: PathSeparator) => ReturnType<fdir["crawl"]>
+    > = {
+      "resolve symlinks": (api) => api.withSymlinks().crawl("/some/dir"),
+      "resolve symlinks (real paths: false)": (api) =>
+        api.withSymlinks({ resolvePaths: false }).crawl("/some/dir"),
+      "resolve symlinks (real paths: false, relative paths: true)": (api) =>
+        api
+          .withSymlinks({ resolvePaths: false })
+          .withRelativePaths()
+          .crawl("/some/dir"),
+      "resolve symlinks (real paths: true, relative paths: true)": (api) =>
+        api.withSymlinks().withRelativePaths().crawl("./relative/dir"),
+      "resolve symlinks (exclude /sym/linked/)": (api, separator) =>
+        api
+          .withSymlinks()
+          .exclude(
+            (_name, path) =>
+              path ===
+              convertSlashes(resolveSymlinkRoot("/sym/linked/"), separator)
+          )
+          .crawl("/some/dir"),
+      "resolve symlinks (exclude /some/dir/dirSymlink/, real paths: false)": (
+        api,
+        separator
+      ) =>
+        api
+          .withSymlinks({ resolvePaths: false })
+          .exclude(
+            (_name, path) =>
+              path ===
+              convertSlashes(
+                resolveSymlinkRoot("/some/dir/dirSymlink/"),
+                separator
+              )
+          )
+          .crawl("/some/dir"),
+      "resolve recursive symlinks": (api) =>
+        api.withSymlinks().crawl("/recursive"),
+      "resolve recursive symlinks (real paths: false)": (api) =>
+        api.withSymlinks({ resolvePaths: false }).crawl("/recursive"),
+      "resolve recursive symlinks (real paths: true, relative paths: true)": (
+        api
+      ) => api.withSymlinks().withRelativePaths().crawl("./recursive"),
+      "resolve recursive symlinks (real paths: false, relative paths: true)": (
+        api
+      ) =>
+        api
+          .withSymlinks({ resolvePaths: false })
+          .withRelativePaths()
+          .crawl("./recursive"),
+    };
+
+    for (const [name, crawl] of Object.entries(crawls)) {
+      test(`${name} with the "${separator}" separator`, async (t) => {
+        const nativeFiles = await crawl(new fdir().withErrors(), path.sep)[
+          type
+        ]();
+        const files = await crawl(
+          new fdir().withErrors().withPathSeparator(separator),
+          separator
+        )[type]();
+        t.expect(files).not.toHaveLength(0);
+        t.expect(files.sort()).toStrictEqual(
+          nativeFiles.map((file) => convertSlashes(file, separator)).sort()
+        );
+      });
+    }
   });
 
   describe(`${type}: a symlink whose target is missing`, () => {
